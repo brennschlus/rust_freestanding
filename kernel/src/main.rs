@@ -1,13 +1,14 @@
 #![no_std]
 #![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
 
 use bootloader_x86_64_common::logger::LockedLogger;
 use conquer_once::spin::OnceCell;
 use core::panic::PanicInfo;
-use vga_buffer::Color;
+use vga_buffer::{Color, background_paint};
 pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
-use bootloader_api::info::{FrameBuffer, FrameBufferInfo};
-mod logger;
+use bootloader_api::info::FrameBufferInfo;
 mod vga_buffer;
 
 bootloader_api::entry_point!(kernel_main);
@@ -39,7 +40,7 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
     init_logger(raw_frame_buffer, frame_buffer_info);
 
-
+    log::info!("Hello world!");
 
     loop {}
 }
@@ -49,48 +50,15 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-fn background_paint(frame_buffer_struct: &mut FrameBuffer, color: Color) {
-    // extract the framebuffer info and, to satisfy the borrow checker, clone it
-    let frame_buffer_info = frame_buffer_struct.info().clone();
 
-    // get the framebuffer's mutable raw byte slice
-    let raw_frame_buffer = frame_buffer_struct.buffer_mut();
 
-    let width = frame_buffer_info.width;
-    let height = frame_buffer_info.height;
-    let bytes_per_pixel = frame_buffer_info.bytes_per_pixel;
 
-    let color_value = color.color_value();
 
-    // Split the color value into four bytes
-    let blue = (color_value & 0xFF) as u8;
-    let green = ((color_value >> 8) & 0xFF) as u8;
-    let red = ((color_value >> 16) & 0xFF) as u8;
-    let alpha = 0xFF;
 
-    // Paint background color
-    for bytes in raw_frame_buffer.chunks_exact_mut(bytes_per_pixel) {
-        bytes[0] = blue; // blue
-        bytes[1] = green; // green
-        bytes[2] = red; // red
-        bytes[3] = alpha; // alpha
-    }
-
-    // Loop over the rows of the screen
-    for row in 0..height {
-        // Loop over the columns of the screen
-        for col in 0..width {
-            // Calculate the index of the first byte of the current pixel
-            let index = (row * width + col) * bytes_per_pixel;
-
-            // Check if the current position is on the edge of the screen
-            if row < 3 || row > height - 4 || col < 3 || col > width - 4 {
-                // Set the bytes to 0xFF for white color
-                raw_frame_buffer[index] = 0xFF; // blue
-                raw_frame_buffer[index + 1] = 0xFF; // green
-                raw_frame_buffer[index + 2] = 0xFF; // red
-                raw_frame_buffer[index + 3] = 0xFF; // alpha
-            }
-        }
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Fn()]) {
+    log::info!("Running {} tests", tests.len());
+    for test in tests {
+        test();
     }
 }
