@@ -27,7 +27,7 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     let frame_buffer = frame_buffer_optional.as_mut().unwrap();
 
 
-    // extract the framebuffer info and, to satisfy the borrow checker, clone it
+    // extract the framebuffer info and, to satisfy the borrow checker
     let frame_buffer_info = frame_buffer.info();
 
     let background_color = Color::LightRed;
