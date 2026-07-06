@@ -9,10 +9,14 @@ use conquer_once::spin::OnceCell;
 use core::panic::PanicInfo;
 use vga_buffer::{Color, background_paint};
 pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
+extern crate alloc;
+
+use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
 use bootloader_api::config::Mapping;
 use bootloader_api::info::FrameBufferInfo;
 use bootloader_api::BootloaderConfig;
 use x86_64::VirtAddr;
+mod allocator;
 mod gdt;
 mod interrupts;
 mod memory;
@@ -74,47 +78,29 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     let mut frame_allocator =
         unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
-    // translate a few addresses to see the page tables in action
-    {
-        use x86_64::structures::paging::Translate;
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
-        let stack_var = 0u64;
-        let addresses = [
-            phys_mem_offset.as_u64(),          // -> physical address 0
-            kernel_main as *const () as u64,   // kernel code
-            &stack_var as *const u64 as u64,   // kernel stack
-        ];
-        for &address in &addresses {
-            let virt = VirtAddr::new(address);
-            let phys = mapper.translate_addr(virt);
-            log::info!("{:?} -> {:?}", virt, phys);
-        }
+    // --- the heap in action ---
+    let heap_value = Box::new(41);
+    log::info!("heap_value at {:p}", heap_value);
+
+    let mut numbers = Vec::new();
+    for i in 0..500 {
+        numbers.push(i);
     }
+    log::info!("vec at {:p}, len {}", numbers.as_slice(), numbers.len());
 
-    // map a fresh page and write through it to prove mappings work
-    {
-        use x86_64::structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags};
-
-        let page: Page = Page::containing_address(VirtAddr::new(0x_4444_4444_0000));
-        let frame = frame_allocator.allocate_frame().expect("no usable frame");
-        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-        unsafe {
-            mapper
-                .map_to(page, frame, flags, &mut frame_allocator)
-                .expect("map_to failed")
-                .flush();
-        }
-
-        let ptr: *mut u64 = page.start_address().as_mut_ptr();
-        unsafe { ptr.write_volatile(0xf021_f077_f065_f04e) };
-        let readback = unsafe { ptr.read_volatile() };
-        log::info!(
-            "mapped {:?} -> {:?}, readback: {:#x}",
-            page.start_address(),
-            frame.start_address(),
-            readback
-        );
-    }
+    let reference_counted = Rc::new(vec![1, 2, 3]);
+    let cloned_reference = reference_counted.clone();
+    log::info!(
+        "current reference count is {}",
+        Rc::strong_count(&cloned_reference)
+    );
+    core::mem::drop(reference_counted);
+    log::info!(
+        "reference count is {} now",
+        Rc::strong_count(&cloned_reference)
+    );
 
     interrupts::init_pics();
 
