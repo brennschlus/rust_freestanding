@@ -12,6 +12,14 @@ pub const HEAP_SIZE: u64 = 100 * 1024; // 100 KiB
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
+pub fn used() -> usize {
+    ALLOCATOR.lock().used()
+}
+
+pub fn free() -> usize {
+    ALLOCATOR.lock().free()
+}
+
 /// Map the heap pages to physical frames and hand the memory range over
 /// to the allocator.
 pub fn init_heap(

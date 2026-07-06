@@ -92,9 +92,18 @@ extern "x86-interrupt" fn page_fault_handler(
     }
 }
 
+static TICKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Timer ticks since the PICs were initialized (PIT default: ~18.2 Hz,
+/// i.e. one tick every ~55 ms).
+pub fn ticks() -> u64 {
+    TICKS.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // nothing to do on ticks yet, but the PIC still needs an EOI,
-    // otherwise it will never send the next interrupt
+    TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+    // the PIC needs an EOI, otherwise it will never send the next interrupt
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());

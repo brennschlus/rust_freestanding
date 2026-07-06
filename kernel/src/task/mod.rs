@@ -6,6 +6,7 @@ use core::task::{Context, Poll};
 
 pub mod executor;
 pub mod keyboard;
+pub mod shell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct TaskId(u64);
