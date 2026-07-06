@@ -102,6 +102,7 @@ pub fn ticks() -> u64 {
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    crate::task::timer::on_tick();
 
     // the PIC needs an EOI, otherwise it will never send the next interrupt
     unsafe {

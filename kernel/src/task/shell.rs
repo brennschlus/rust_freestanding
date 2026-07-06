@@ -1,4 +1,6 @@
 use super::keyboard::ScancodeStream;
+use super::timer;
+use crate::speaker;
 use crate::{print, println};
 use alloc::string::String;
 use futures_util::stream::StreamExt;
@@ -26,7 +28,13 @@ pub async fn run() {
         match key {
             DecodedKey::Unicode('\n' | '\r') => {
                 println!();
-                execute(line.trim());
+                // piano needs the scancode stream itself, so it is
+                // handled here instead of in execute()
+                if line.trim() == "piano" {
+                    piano(&mut scancodes, &mut keyboard).await;
+                } else {
+                    execute(line.trim()).await;
+                }
                 line.clear();
                 print!("> ");
             }
@@ -45,7 +53,7 @@ pub async fn run() {
     }
 }
 
-fn execute(line: &str) {
+async fn execute(line: &str) {
     let mut parts = line.split_whitespace();
     let Some(command) = parts.next() else {
         return;
@@ -53,11 +61,14 @@ fn execute(line: &str) {
     match command {
         "help" => {
             println!("available commands:");
-            println!("  help          this text");
-            println!("  echo <text>   print text");
-            println!("  clear         clear the screen");
-            println!("  uptime        time since boot");
-            println!("  heap          allocator statistics");
+            println!("  help           this text");
+            println!("  echo <text>    print text");
+            println!("  clear          clear the screen");
+            println!("  uptime         time since boot");
+            println!("  heap           allocator statistics");
+            println!("  beep [hz] [ms] beep (default 440 Hz, 300 ms)");
+            println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
+            println!("  piano          live keyboard instrument");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
@@ -76,6 +87,93 @@ fn execute(line: &str) {
                 crate::allocator::free()
             );
         }
+        "beep" => {
+            let freq = parts.next().and_then(|s| s.parse().ok()).unwrap_or(440);
+            let ms = parts.next().and_then(|s| s.parse().ok()).unwrap_or(300);
+            speaker::start_tone(freq);
+            timer::sleep_ms(ms).await;
+            speaker::stop_tone();
+        }
+        "play" => {
+            // notes like c4, d#4; an optional :ms suffix sets the length
+            for token in parts {
+                let (note, ms) = match token.split_once(':') {
+                    Some((note, ms)) => (note, ms.parse().unwrap_or(400)),
+                    None => (token, 400),
+                };
+                let Some(freq) = speaker::note_freq(note) else {
+                    println!("bad note '{}'", note);
+                    break;
+                };
+                speaker::start_tone(freq);
+                timer::sleep_ms(ms).await;
+                speaker::stop_tone();
+                // short gap so repeated notes are distinguishable
+                timer::sleep_ms(30).await;
+            }
+        }
         unknown => println!("unknown command '{}', try 'help'", unknown),
     }
+}
+
+/// Live instrument: the tone sounds for as long as the key is held,
+/// like an organ. Works on raw key events (down/up) instead of decoded
+/// characters.
+async fn piano(
+    scancodes: &mut ScancodeStream,
+    keyboard: &mut Keyboard<layouts::Us104Key, ScancodeSet1>,
+) {
+    use pc_keyboard::{KeyCode, KeyState};
+
+    println!("piano: a s d f g h j k = c4..c5, w e t y u = sharps, esc exits");
+
+    let mut sounding: Option<KeyCode> = None;
+    while let Some(scancode) = scancodes.next().await {
+        let Ok(Some(event)) = keyboard.add_byte(scancode) else {
+            continue;
+        };
+        match event.state {
+            KeyState::Down => {
+                if event.code == KeyCode::Escape {
+                    speaker::stop_tone();
+                    break;
+                }
+                if let Some(freq) = key_note_freq(event.code) {
+                    speaker::start_tone(freq);
+                    sounding = Some(event.code);
+                }
+            }
+            KeyState::Up => {
+                // only stop if no newer note took over the speaker
+                if sounding == Some(event.code) {
+                    speaker::stop_tone();
+                    sounding = None;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Map the middle keyboard row to one octave, tracker-style.
+fn key_note_freq(code: pc_keyboard::KeyCode) -> Option<u32> {
+    use pc_keyboard::KeyCode;
+
+    let note = match code {
+        KeyCode::A => "c4",
+        KeyCode::W => "c#4",
+        KeyCode::S => "d4",
+        KeyCode::E => "d#4",
+        KeyCode::D => "e4",
+        KeyCode::F => "f4",
+        KeyCode::T => "f#4",
+        KeyCode::G => "g4",
+        KeyCode::Y => "g#4",
+        KeyCode::H => "a4",
+        KeyCode::U => "a#4",
+        KeyCode::J => "b4",
+        KeyCode::K => "c5",
+        _ => return None,
+    };
+    speaker::note_freq(note)
 }

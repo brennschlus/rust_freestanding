@@ -16,6 +16,7 @@ mod console;
 mod gdt;
 mod interrupts;
 mod memory;
+mod speaker;
 mod task;
 mod vga_buffer;
 
