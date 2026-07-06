@@ -20,7 +20,10 @@ mod allocator;
 mod gdt;
 mod interrupts;
 mod memory;
+mod task;
 mod vga_buffer;
+
+use task::{Task, executor::Executor};
 
 // ask the bootloader to map the whole physical memory into the virtual
 // address space, so the kernel can reach the page tables
@@ -104,10 +107,21 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
     interrupts::init_pics();
 
-    // halt the CPU until the next interrupt instead of busy-looping
-    loop {
-        x86_64::instructions::hlt();
-    }
+    // the executor takes over as the kernel's idle loop: it polls woken
+    // tasks and halts the CPU when there is nothing to do
+    let mut executor = Executor::new();
+    executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(task::keyboard::print_keypresses()));
+    executor.run();
+}
+
+async fn async_number() -> u32 {
+    42
+}
+
+async fn example_task() {
+    let number = async_number().await;
+    log::info!("async number: {}", number);
 }
 
 #[panic_handler]

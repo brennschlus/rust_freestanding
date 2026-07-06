@@ -19,3 +19,5 @@ x86_64 = "0.15.4"
 pic8259 = "0.11.0"
 pc-keyboard = "0.8.0"
 linked_list_allocator = "0.10.5"
+crossbeam-queue = { version = "0.3.8", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3.28", default-features = false, features = ["alloc"] }

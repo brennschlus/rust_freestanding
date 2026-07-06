@@ -1,6 +1,5 @@
 use crate::gdt;
 use conquer_once::spin::OnceCell;
-use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
 use pic8259::ChainedPics;
 use spinning_top::Spinlock;
 use x86_64::instructions::port::Port;
@@ -102,33 +101,15 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     }
 }
 
-// the Keyboard decoder is stateful (modifiers, multi-byte scancodes),
-// so it lives in a static behind a lock
-static KEYBOARD: OnceCell<Spinlock<Keyboard<layouts::Us104Key, ScancodeSet1>>> = OnceCell::uninit();
-
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    let keyboard_lock = KEYBOARD.get_or_init(|| {
-        Spinlock::new(Keyboard::new(
-            ScancodeSet1::new(),
-            layouts::Us104Key,
-            HandleControl::Ignore,
-        ))
-    });
-    let mut keyboard = keyboard_lock.lock();
-
     // the PS/2 controller won't fire the next interrupt until the
     // current scancode is read from its data port
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
-    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard.process_keyevent(key_event) {
-            match key {
-                DecodedKey::Unicode(character) => log::info!("key: {}", character),
-                DecodedKey::RawKey(key) => log::info!("key: {:?}", key),
-            }
-        }
-    }
+    // decoding happens in the async keyboard task; the handler only
+    // queues the raw scancode and returns as fast as possible
+    crate::task::keyboard::add_scancode(scancode);
 
     unsafe {
         PICS.lock()
