@@ -51,7 +51,12 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
     log::info!("It did not crash!");
 
-    loop {}
+    interrupts::init_pics();
+
+    // halt the CPU until the next interrupt instead of busy-looping
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
 
 #[panic_handler]

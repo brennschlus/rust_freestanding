@@ -1,6 +1,31 @@
 use crate::gdt;
 use conquer_once::spin::OnceCell;
+use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
+use pic8259::ChainedPics;
+use spinning_top::Spinlock;
+use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
+
+// remap the PICs: their default vectors 0-15 collide with CPU exceptions,
+// so move them to 32-47 (right after the 32 exception slots)
+pub const PIC_1_OFFSET: u8 = 32;
+pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+
+static PICS: Spinlock<ChainedPics> =
+    Spinlock::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET, // IRQ 0
+    Keyboard,             // IRQ 1
+}
+
+impl InterruptIndex {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
 
 // The IDT must live for the rest of the program ('static), because the CPU
 // keeps reading it on every interrupt. A static OnceCell gives us that
@@ -19,9 +44,18 @@ pub fn init_idt() {
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
+        idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
         idt
     });
     idt.load();
+}
+
+/// Initialize the PICs and let the CPU start receiving hardware
+/// interrupts (`sti`). The IDT must be loaded before this is called.
+pub fn init_pics() {
+    unsafe { PICS.lock().initialize() };
+    x86_64::instructions::interrupts::enable();
 }
 
 // `x86-interrupt` makes the compiler generate the special entry/exit code
@@ -37,4 +71,47 @@ extern "x86-interrupt" fn double_fault_handler(
 ) -> ! {
     log::error!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
     loop {}
+}
+
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // nothing to do on ticks yet, but the PIC still needs an EOI,
+    // otherwise it will never send the next interrupt
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+// the Keyboard decoder is stateful (modifiers, multi-byte scancodes),
+// so it lives in a static behind a lock
+static KEYBOARD: OnceCell<Spinlock<Keyboard<layouts::Us104Key, ScancodeSet1>>> = OnceCell::uninit();
+
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let keyboard_lock = KEYBOARD.get_or_init(|| {
+        Spinlock::new(Keyboard::new(
+            ScancodeSet1::new(),
+            layouts::Us104Key,
+            HandleControl::Ignore,
+        ))
+    });
+    let mut keyboard = keyboard_lock.lock();
+
+    // the PS/2 controller won't fire the next interrupt until the
+    // current scancode is read from its data port
+    let mut port = Port::new(0x60);
+    let scancode: u8 = unsafe { port.read() };
+
+    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+        if let Some(key) = keyboard.process_keyevent(key_event) {
+            match key {
+                DecodedKey::Unicode(character) => log::info!("key: {}", character),
+                DecodedKey::RawKey(key) => log::info!("key: {:?}", key),
+            }
+        }
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
 }

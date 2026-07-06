@@ -16,3 +16,5 @@ conquer-once = { version = "0.4.0", default-features = false }
 font8x8 = { version = "0.3.1", default-features =false, features= ["unicode"] }
 spinning_top = "0.3.0"
 x86_64 = "0.15.4"
+pic8259 = "0.11.0"
+pc-keyboard = "0.8.0"
