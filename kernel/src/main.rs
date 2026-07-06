@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 
@@ -9,6 +10,7 @@ use core::panic::PanicInfo;
 use vga_buffer::{Color, background_paint};
 pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
 use bootloader_api::info::FrameBufferInfo;
+mod interrupts;
 mod vga_buffer;
 
 bootloader_api::entry_point!(kernel_main);
@@ -39,6 +41,13 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     init_logger(raw_frame_buffer, frame_buffer_info);
 
     log::info!("Hello world!");
+
+    interrupts::init_idt();
+
+    // trigger a breakpoint exception to check that the IDT works
+    x86_64::instructions::interrupts::int3();
+
+    log::info!("It did not crash!");
 
     loop {}
 }
