@@ -10,6 +10,7 @@ use core::panic::PanicInfo;
 use vga_buffer::{Color, background_paint};
 pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
 use bootloader_api::info::FrameBufferInfo;
+mod gdt;
 mod interrupts;
 mod vga_buffer;
 
@@ -42,6 +43,7 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
     log::info!("Hello world!");
 
+    gdt::init();
     interrupts::init_idt();
 
     // trigger a breakpoint exception to check that the IDT works
