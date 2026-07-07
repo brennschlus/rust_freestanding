@@ -33,6 +33,12 @@ pub async fn run() {
                 match line.trim() {
                     "piano" => piano(&mut scancodes, &mut keyboard).await,
                     "organ" => organ(&mut scancodes, &mut keyboard).await,
+                    // reads the score from the keyboard, so it needs the
+                    // scancode stream like the instruments do
+                    "celebrare -" => {
+                        let score = read_score(&mut scancodes, &mut keyboard).await;
+                        crate::celebrare::celebrare("-", Some(score)).await;
+                    }
                     other => execute(other).await,
                 }
                 line.clear();
@@ -70,6 +76,7 @@ async fn execute(line: &str) {
             println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
             println!("  piano          live instrument (pc speaker, mono)");
             println!("  organ          live instrument (ac97, polyphonic)");
+            println!("  celebrare <s>  run an Officium score (meteor, or - to type one)");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
@@ -113,8 +120,57 @@ async fn execute(line: &str) {
                 timer::sleep_ms(30).await;
             }
         }
+        "celebrare" => {
+            let name = parts.next().unwrap_or("meteor");
+            crate::celebrare::celebrare(name, None).await;
+        }
         unknown => println!("unknown command '{}', try 'help'", unknown),
     }
+}
+
+/// Read a multi-line Officium score from the keyboard: lines echo as
+/// typed; an empty line ends the score (celebrare '-' mode, §10.2).
+async fn read_score(
+    scancodes: &mut ScancodeStream,
+    keyboard: &mut Keyboard<layouts::Us104Key, ScancodeSet1>,
+) -> alloc::string::String {
+    use alloc::string::String;
+
+    println!("type the score; an empty line celebrates it");
+    let mut score = String::new();
+    let mut line = String::new();
+    print!("| ");
+    while let Some(scancode) = scancodes.next().await {
+        let Ok(Some(key_event)) = keyboard.add_byte(scancode) else {
+            continue;
+        };
+        let Some(key) = keyboard.process_keyevent(key_event) else {
+            continue;
+        };
+        match key {
+            DecodedKey::Unicode('\n' | '\r') => {
+                println!();
+                if line.is_empty() {
+                    return score;
+                }
+                score.push_str(&line);
+                score.push('\n');
+                line.clear();
+                print!("| ");
+            }
+            DecodedKey::Unicode('\x08' | '\x7f') => {
+                if line.pop().is_some() {
+                    print!("\x08");
+                }
+            }
+            DecodedKey::Unicode(c) if !c.is_control() => {
+                line.push(c);
+                print!("{}", c);
+            }
+            _ => {}
+        }
+    }
+    score
 }
 
 /// Live instrument: the tone sounds for as long as the key is held,

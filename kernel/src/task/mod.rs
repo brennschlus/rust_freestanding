@@ -9,6 +9,31 @@ pub mod keyboard;
 pub mod shell;
 pub mod timer;
 
+/// Yield to the executor once: returns Pending after re-queuing itself,
+/// so long-running computations (an Officium fugue between fuel slices)
+/// let other tasks and the keyboard breathe.
+pub fn yield_now() -> YieldNow {
+    YieldNow { yielded: false }
+}
+
+pub struct YieldNow {
+    yielded: bool,
+}
+
+impl Future for YieldNow {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.yielded {
+            Poll::Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct TaskId(u64);
 

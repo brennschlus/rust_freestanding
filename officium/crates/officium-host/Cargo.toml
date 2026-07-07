@@ -1,0 +1,9 @@
+[package]
+name = "officium-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+officium-core = { path = "../officium-core", features = ["std"] }
+officium-parse = { path = "../officium-parse", features = ["std"] }
+officium-audio = { path = "../officium-audio", features = ["std", "audio-mock"] }

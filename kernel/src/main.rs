@@ -13,6 +13,7 @@ use x86_64::VirtAddr;
 
 mod ac97;
 mod allocator;
+mod celebrare;
 mod console;
 mod gdt;
 mod interrupts;
@@ -29,6 +30,9 @@ use task::{Task, executor::Executor};
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    // the Officium parser is a recursive descent; give it headroom
+    // (the default 80 KiB overflowed into a double fault)
+    config.kernel_stack_size = 512 * 1024;
     config
 };
 

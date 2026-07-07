@@ -1,0 +1,11 @@
+[package]
+name = "officium-parse"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+std = ["officium-core/std"]
+
+[dependencies]
+officium-core = { path = "../officium-core", default-features = false }

@@ -1,0 +1,13 @@
+[package]
+name = "officium-audio"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+std = ["officium-core/std"]
+audio-mock = []
+
+[dependencies]
+officium-core = { path = "../officium-core", default-features = false }
+libm = "0.2"

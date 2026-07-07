@@ -1,0 +1,35 @@
+; Officium reference score (§14): planetary defense in three modes.
+; Protus computes a deflection field (or nihil), Hypomixolydian turns
+; it into a Plan, Mixolydian commits it — the only impure verse.
+
+fuga gravitas in Sol {
+  pedale     G = 6.674e-11                ; grav. constant, held in the pedals
+  subiectum  trahere(corpus) = \r -> G * mass(corpus) / (r * r)
+  reale      trahere @ asteroides = \r -> G * mass(corpus) / (r * r)
+  tonale     trahere @ cometes    = \r -> (G * mass(corpus) / (r * r)) + outgassing(corpus)
+  contra     \r -> r * r                  ; r-squared always sounds with the subject
+}
+
+versus correctio in Re {                  ; Protus = Maybe. Plan a deflection, or nihil.
+  corpus <- arg
+  g      <- ask "G"
+  r      <- pure (dist corpus)
+  f      <- resolve "trahere" (genus corpus)
+  si (safe corpus g) tunc {
+    nihil                                 ; already safe -> no correction
+  } aliter {
+    dv <- pure (solve f r)
+    amen (deflect dv)                     ; cadence: return the pure Field
+  }
+}
+
+versus consilium in sol {                 ; Hypomixolydian = Plan. Pure. Nothing leaves.
+  field <- arg
+  mitte (cmd (target field) (dv_of field) (at field))
+  amen field
+}
+
+versus executio in Sol {                  ; Mixolydian = commit. The ONLY impure verse.
+  plan <- arg
+  perage plan
+}

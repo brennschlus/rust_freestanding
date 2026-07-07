@@ -20,3 +20,6 @@ pc-keyboard = "0.8.0"
 linked_list_allocator = "0.10.5"
 crossbeam-queue = { version = "0.3.8", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3.28", default-features = false, features = ["alloc"] }
+officium-core = { path = "../officium/crates/officium-core", default-features = false }
+officium-parse = { path = "../officium/crates/officium-parse", default-features = false }
+officium-audio = { path = "../officium/crates/officium-audio", default-features = false }

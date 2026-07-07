@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/officium-core",
+    "crates/officium-parse",
+    "crates/officium-audio",
+    "crates/officium-host",
+]
+
+[profile.dev]
+opt-level = 1
