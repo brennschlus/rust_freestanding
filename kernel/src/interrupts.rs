@@ -15,9 +15,22 @@ static PICS: Spinlock<ChainedPics> =
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
-    Timer = PIC_1_OFFSET,        // IRQ 0
-    Keyboard,                    // IRQ 1
-    Sb16 = PIC_1_OFFSET + 5,     // IRQ 5 (QEMU sb16 default)
+    Timer = PIC_1_OFFSET, // IRQ 0
+    Keyboard,             // IRQ 1
+}
+
+/// IRQ line of the PCI sound card, set before the PICs are unmasked.
+/// The firmware routes PCI interrupts to one of the free ISA lines; we
+/// pre-register handlers for the plausible ones (9, 10, 11) and unmask
+/// only the line the card actually got.
+static PCI_SOUND_IRQ: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+pub fn register_pci_sound_irq(line: u8) -> Result<(), &'static str> {
+    if !(9..=11).contains(&line) {
+        return Err("PCI IRQ line outside the expected 9-11 range");
+    }
+    PCI_SOUND_IRQ.store(line, core::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 impl InterruptIndex {
@@ -46,7 +59,9 @@ pub fn init_idt() {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
-        idt[InterruptIndex::Sb16.as_u8()].set_handler_fn(sb16_interrupt_handler);
+        idt[PIC_1_OFFSET + 9].set_handler_fn(pci_sound_irq9_handler);
+        idt[PIC_1_OFFSET + 10].set_handler_fn(pci_sound_irq10_handler);
+        idt[PIC_1_OFFSET + 11].set_handler_fn(pci_sound_irq11_handler);
         idt
     });
     idt.load();
@@ -55,12 +70,17 @@ pub fn init_idt() {
 /// Initialize the PICs and let the CPU start receiving hardware
 /// interrupts (`sti`). The IDT must be loaded before this is called.
 pub fn init_pics() {
+    // deterministic masks: only IRQ 0 (timer), 1 (keyboard), 2 (cascade)
+    // and, if a card was found, the PCI sound line; the rest stays masked
+    let mut mask = !0b0000_0111u16;
+    let sound_irq = PCI_SOUND_IRQ.load(core::sync::atomic::Ordering::Relaxed);
+    if sound_irq != 0 {
+        mask &= !(1 << sound_irq);
+    }
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        // deterministic masks: only IRQ 0 (timer), 1 (keyboard),
-        // 2 (cascade) and 5 (sb16); everything else stays masked
-        pics.write_masks(0b1101_1000, 0b1111_1111);
+        pics.write_masks(mask as u8, (mask >> 8) as u8);
     }
     x86_64::instructions::interrupts::enable();
 }
@@ -122,14 +142,27 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     }
 }
 
-extern "x86-interrupt" fn sb16_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // refills the next half of the DMA buffer and acks the card
-    crate::sb16::handle_irq();
+// PCI interrupts are level-triggered: the handler must make the card
+// drop its line (ack in ac97::handle_irq) before the EOI, or the same
+// interrupt fires again immediately.
+fn pci_sound_irq(line: u8) {
+    crate::ac97::handle_irq();
 
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Sb16.as_u8());
+        PICS.lock().notify_end_of_interrupt(PIC_1_OFFSET + line);
     }
+}
+
+extern "x86-interrupt" fn pci_sound_irq9_handler(_stack_frame: InterruptStackFrame) {
+    pci_sound_irq(9);
+}
+
+extern "x86-interrupt" fn pci_sound_irq10_handler(_stack_frame: InterruptStackFrame) {
+    pci_sound_irq(10);
+}
+
+extern "x86-interrupt" fn pci_sound_irq11_handler(_stack_frame: InterruptStackFrame) {
+    pci_sound_irq(11);
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {

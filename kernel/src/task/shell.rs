@@ -69,7 +69,7 @@ async fn execute(line: &str) {
             println!("  beep [hz] [ms] beep (default 440 Hz, 300 ms)");
             println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
             println!("  piano          live instrument (pc speaker, mono)");
-            println!("  organ          live instrument (sb16, polyphonic)");
+            println!("  organ          live instrument (ac97, polyphonic)");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
@@ -156,15 +156,15 @@ async fn piano(
     }
 }
 
-/// Polyphonic organ on the SB16: every held key is a voice, chords work.
+/// Polyphonic organ on the AC97: every held key is a voice, chords work.
 async fn organ(
     scancodes: &mut ScancodeStream,
     keyboard: &mut Keyboard<layouts::Us104Key, ScancodeSet1>,
 ) {
     use pc_keyboard::{KeyCode, KeyState};
 
-    if !crate::sb16::is_available() {
-        println!("sb16 not available");
+    if !crate::ac97::is_available() {
+        println!("ac97 not available");
         return;
     }
     println!("organ: a s d f g h j k = c4..c5, w e t y u = sharps, esc exits");
@@ -177,16 +177,16 @@ async fn organ(
         match event.state {
             KeyState::Down => {
                 if event.code == KeyCode::Escape {
-                    crate::sb16::all_notes_off();
+                    crate::ac97::all_notes_off();
                     break;
                 }
                 if let Some(freq) = key_note_freq(event.code) {
-                    crate::sb16::note_on(freq);
+                    crate::ac97::note_on(freq);
                 }
             }
             KeyState::Up => {
                 if let Some(freq) = key_note_freq(event.code) {
-                    crate::sb16::note_off(freq);
+                    crate::ac97::note_off(freq);
                 }
             }
             _ => {}

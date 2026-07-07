@@ -11,12 +11,13 @@ use bootloader_api::BootloaderConfig;
 use core::panic::PanicInfo;
 use x86_64::VirtAddr;
 
+mod ac97;
 mod allocator;
 mod console;
 mod gdt;
 mod interrupts;
 mod memory;
-mod sb16;
+mod pci;
 mod speaker;
 mod task;
 mod vga_buffer;
@@ -54,10 +55,9 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
-    // sound card (before enabling interrupts: its IRQ starts right away)
-    match sb16::init(&mut frame_allocator, phys_mem_offset) {
-        Ok(()) => log::info!("sb16: initialized"),
-        Err(e) => log::warn!("sb16: not available ({})", e),
+    // sound card (before init_pics: it registers its IRQ line there)
+    if let Err(e) = ac97::init(&mut frame_allocator, phys_mem_offset) {
+        log::warn!("ac97: not available ({})", e);
     }
 
     interrupts::init_pics();
@@ -70,7 +70,7 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     // tasks and halts the CPU when there is nothing to do
     let mut executor = Executor::new();
     executor.spawn(Task::new(task::shell::run()));
-    executor.spawn(Task::new(sb16::run_synth()));
+    executor.spawn(Task::new(ac97::run_synth()));
     executor.run();
 }
 
