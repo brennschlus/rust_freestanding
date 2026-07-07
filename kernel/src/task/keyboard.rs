@@ -8,19 +8,36 @@ use futures_util::task::AtomicWaker;
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
 
-/// Called by the keyboard interrupt handler.
+/// Read every byte the i8042 controller has buffered and queue the
+/// keyboard ones. Draining completely matters: leaving a byte unread
+/// keeps the controller's interrupt line high, and the edge-triggered
+/// PIC then never sees another keyboard interrupt -- input dies. Called
+/// from the keyboard interrupt and, as a lost-edge safety net, from the
+/// timer tick.
 ///
-/// Must not block or allocate, so it only pushes into a pre-allocated
+/// Must not block or allocate: it only pushes into a pre-allocated
 /// lock-free queue and wakes the stream task.
-pub(crate) fn add_scancode(scancode: u8) {
-    if let Ok(queue) = SCANCODE_QUEUE.try_get() {
-        if queue.push(scancode).is_err() {
-            log::warn!("scancode queue full; dropping keyboard input");
-        } else {
-            WAKER.wake();
+pub(crate) fn drain_controller() {
+    use x86_64::instructions::port::Port;
+
+    let mut status_port = Port::<u8>::new(0x64);
+    let mut data_port = Port::<u8>::new(0x60);
+    loop {
+        let status = unsafe { status_port.read() };
+        if status & 0x01 == 0 {
+            break; // output buffer empty
         }
-    } else {
-        log::warn!("scancode queue uninitialized");
+        let byte = unsafe { data_port.read() };
+        if status & 0x20 != 0 {
+            continue; // mouse byte: discard, we only speak keyboard
+        }
+        if let Ok(queue) = SCANCODE_QUEUE.try_get() {
+            if queue.push(byte).is_err() {
+                log::warn!("scancode queue full; dropping keyboard input");
+            } else {
+                WAKER.wake();
+            }
+        }
     }
 }
 

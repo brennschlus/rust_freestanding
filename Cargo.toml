@@ -7,6 +7,11 @@ default-run = "qemu-bios"
 [workspace]
 members = ["kernel"]
 
+# the kernel runs under QEMU's TCG emulation; unoptimized code there is
+# slow enough to starve the audio synthesis, so optimize dev builds too
+[profile.dev]
+opt-level = 2
+
 [build-dependencies]
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 bootloader = "0.11.3"

@@ -2,7 +2,6 @@ use crate::gdt;
 use conquer_once::spin::OnceCell;
 use pic8259::ChainedPics;
 use spinning_top::Spinlock;
-use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 // remap the PICs: their default vectors 0-15 collide with CPU exceptions,
@@ -16,8 +15,9 @@ static PICS: Spinlock<ChainedPics> =
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
-    Timer = PIC_1_OFFSET, // IRQ 0
-    Keyboard,             // IRQ 1
+    Timer = PIC_1_OFFSET,        // IRQ 0
+    Keyboard,                    // IRQ 1
+    Sb16 = PIC_1_OFFSET + 5,     // IRQ 5 (QEMU sb16 default)
 }
 
 impl InterruptIndex {
@@ -46,6 +46,7 @@ pub fn init_idt() {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Sb16.as_u8()].set_handler_fn(sb16_interrupt_handler);
         idt
     });
     idt.load();
@@ -54,7 +55,13 @@ pub fn init_idt() {
 /// Initialize the PICs and let the CPU start receiving hardware
 /// interrupts (`sti`). The IDT must be loaded before this is called.
 pub fn init_pics() {
-    unsafe { PICS.lock().initialize() };
+    unsafe {
+        let mut pics = PICS.lock();
+        pics.initialize();
+        // deterministic masks: only IRQ 0 (timer), 1 (keyboard),
+        // 2 (cascade) and 5 (sb16); everything else stays masked
+        pics.write_masks(0b1101_1000, 0b1111_1111);
+    }
     x86_64::instructions::interrupts::enable();
 }
 
@@ -104,6 +111,10 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     crate::task::timer::on_tick();
 
+    // safety net: if a keyboard interrupt edge got lost (the i8042 line
+    // stuck high), pick up the stranded bytes by polling
+    crate::task::keyboard::drain_controller();
+
     // the PIC needs an EOI, otherwise it will never send the next interrupt
     unsafe {
         PICS.lock()
@@ -111,15 +122,20 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     }
 }
 
-extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // the PS/2 controller won't fire the next interrupt until the
-    // current scancode is read from its data port
-    let mut port = Port::new(0x60);
-    let scancode: u8 = unsafe { port.read() };
+extern "x86-interrupt" fn sb16_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // refills the next half of the DMA buffer and acks the card
+    crate::sb16::handle_irq();
 
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Sb16.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // decoding happens in the async keyboard task; the handler only
-    // queues the raw scancode and returns as fast as possible
-    crate::task::keyboard::add_scancode(scancode);
+    // drains the controller into the scancode queue
+    crate::task::keyboard::drain_controller();
 
     unsafe {
         PICS.lock()

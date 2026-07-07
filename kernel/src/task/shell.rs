@@ -28,12 +28,12 @@ pub async fn run() {
         match key {
             DecodedKey::Unicode('\n' | '\r') => {
                 println!();
-                // piano needs the scancode stream itself, so it is
-                // handled here instead of in execute()
-                if line.trim() == "piano" {
-                    piano(&mut scancodes, &mut keyboard).await;
-                } else {
-                    execute(line.trim()).await;
+                // the instruments need the scancode stream itself, so
+                // they are handled here instead of in execute()
+                match line.trim() {
+                    "piano" => piano(&mut scancodes, &mut keyboard).await,
+                    "organ" => organ(&mut scancodes, &mut keyboard).await,
+                    other => execute(other).await,
                 }
                 line.clear();
                 print!("> ");
@@ -68,7 +68,8 @@ async fn execute(line: &str) {
             println!("  heap           allocator statistics");
             println!("  beep [hz] [ms] beep (default 440 Hz, 300 ms)");
             println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
-            println!("  piano          live keyboard instrument");
+            println!("  piano          live instrument (pc speaker, mono)");
+            println!("  organ          live instrument (sb16, polyphonic)");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
@@ -148,6 +149,44 @@ async fn piano(
                 if sounding == Some(event.code) {
                     speaker::stop_tone();
                     sounding = None;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Polyphonic organ on the SB16: every held key is a voice, chords work.
+async fn organ(
+    scancodes: &mut ScancodeStream,
+    keyboard: &mut Keyboard<layouts::Us104Key, ScancodeSet1>,
+) {
+    use pc_keyboard::{KeyCode, KeyState};
+
+    if !crate::sb16::is_available() {
+        println!("sb16 not available");
+        return;
+    }
+    println!("organ: a s d f g h j k = c4..c5, w e t y u = sharps, esc exits");
+    println!("polyphonic: hold several keys for a chord");
+
+    while let Some(scancode) = scancodes.next().await {
+        let Ok(Some(event)) = keyboard.add_byte(scancode) else {
+            continue;
+        };
+        match event.state {
+            KeyState::Down => {
+                if event.code == KeyCode::Escape {
+                    crate::sb16::all_notes_off();
+                    break;
+                }
+                if let Some(freq) = key_note_freq(event.code) {
+                    crate::sb16::note_on(freq);
+                }
+            }
+            KeyState::Up => {
+                if let Some(freq) = key_note_freq(event.code) {
+                    crate::sb16::note_off(freq);
                 }
             }
             _ => {}
