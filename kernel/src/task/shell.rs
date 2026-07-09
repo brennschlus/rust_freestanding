@@ -33,6 +33,7 @@ pub async fn run() {
                 match line.trim() {
                     "piano" => piano(&mut scancodes, &mut keyboard).await,
                     "organ" => organ(&mut scancodes, &mut keyboard).await,
+                    "transcribe" => transcribe(&mut scancodes, &mut keyboard).await,
                     // reads the score from the keyboard, so it needs the
                     // scancode stream like the instruments do
                     "celebrare -" => {
@@ -76,6 +77,7 @@ async fn execute(line: &str) {
             println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
             println!("  piano          live instrument (pc speaker, mono)");
             println!("  organ          live instrument (ac97, polyphonic)");
+            println!("  transcribe     play a phrase, hear it back as an Officium verse");
             println!("  celebrare <s>  run an Officium score (meteor, cantus, or - to type one)");
         }
         "echo" => {
@@ -250,25 +252,133 @@ async fn organ(
     }
 }
 
-/// Map the middle keyboard row to one octave, tracker-style.
-fn key_note_freq(code: pc_keyboard::KeyCode) -> Option<u32> {
+/// M8, audio-in: the keyboard is the manual. Notes sound as they are
+/// played and are collected; enter transcribes the phrase into a
+/// plain-form verse (§8.1: the last note is the cadence — the final),
+/// which is then shown and celebrated like any other score.
+async fn transcribe(
+    scancodes: &mut ScancodeStream,
+    keyboard: &mut Keyboard<layouts::Us104Key, ScancodeSet1>,
+) {
+    use alloc::vec::Vec;
+    use pc_keyboard::{KeyCode, KeyState};
+
+    println!("transcribe: play the manual (z-row = octave 3, a-row = octave 4, o l p above)");
+    println!("the last note is the cadence; enter transcribes, esc abandons");
+
+    let poly = crate::ac97::is_available();
+    let mut played: Vec<u8> = Vec::new();
+    while let Some(scancode) = scancodes.next().await {
+        let Ok(Some(event)) = keyboard.add_byte(scancode) else {
+            continue;
+        };
+        match event.state {
+            KeyState::Down => match event.code {
+                KeyCode::Escape => {
+                    quiet(poly);
+                    println!();
+                    println!("abandoned");
+                    return;
+                }
+                KeyCode::Return | KeyCode::NumpadEnter => break,
+                code => {
+                    if let Some(pitch) = key_midi(code) {
+                        let hz = officium_audio::pitch_hz(pitch);
+                        if poly {
+                            crate::ac97::note_on(hz);
+                        } else {
+                            speaker::start_tone(hz);
+                        }
+                        played.push(pitch);
+                        print!("{} ", midi_name(pitch));
+                    }
+                }
+            },
+            KeyState::Up => {
+                if let Some(pitch) = key_midi(event.code) {
+                    let hz = officium_audio::pitch_hz(pitch);
+                    if poly {
+                        crate::ac97::note_off(hz);
+                    } else {
+                        speaker::stop_tone();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    quiet(poly);
+    println!();
+
+    let text = match officium_audio::transcribe(&played, "auditum") {
+        Ok(t) => t,
+        Err(officium_core::types::Dissonance::Parse { line, msg }) => {
+            println!("dissonantia (note {}): {}", line, msg);
+            return;
+        }
+        Err(d) => {
+            println!("dissonantia: {:?}", d);
+            return;
+        }
+    };
+    println!("--- transcriptum ---");
+    print!("{}", text);
+    println!("--------------------");
+    crate::celebrare::celebrare("-", Some(text)).await;
+}
+
+fn quiet(poly: bool) {
+    if poly {
+        crate::ac97::all_notes_off();
+    } else {
+        speaker::stop_tone();
+    }
+}
+
+/// The manual, tracker-style: bottom row = octave 3 (white keys),
+/// middle row = octave 4 with sharps above, o/l/p extend past c5. Two
+/// octaves and a third — enough ambitus for all eight church modes.
+fn key_midi(code: pc_keyboard::KeyCode) -> Option<u8> {
     use pc_keyboard::KeyCode;
 
-    let note = match code {
-        KeyCode::A => "c4",
-        KeyCode::W => "c#4",
-        KeyCode::S => "d4",
-        KeyCode::E => "d#4",
-        KeyCode::D => "e4",
-        KeyCode::F => "f4",
-        KeyCode::T => "f#4",
-        KeyCode::G => "g4",
-        KeyCode::Y => "g#4",
-        KeyCode::H => "a4",
-        KeyCode::U => "a#4",
-        KeyCode::J => "b4",
-        KeyCode::K => "c5",
+    Some(match code {
+        // octave 3: z x c v b n m = c3..b3
+        KeyCode::Z => 48,
+        KeyCode::X => 50,
+        KeyCode::C => 52,
+        KeyCode::V => 53,
+        KeyCode::B => 55,
+        KeyCode::N => 57,
+        KeyCode::M => 59,
+        // octave 4: a s d f g h j k = c4..c5, w e t y u = sharps
+        KeyCode::A => 60,
+        KeyCode::W => 61,
+        KeyCode::S => 62,
+        KeyCode::E => 63,
+        KeyCode::D => 64,
+        KeyCode::F => 65,
+        KeyCode::T => 66,
+        KeyCode::G => 67,
+        KeyCode::Y => 68,
+        KeyCode::H => 69,
+        KeyCode::U => 70,
+        KeyCode::J => 71,
+        KeyCode::K => 72,
+        // past c5: o l p = c#5 d5 d#5
+        KeyCode::O => 73,
+        KeyCode::L => 74,
+        KeyCode::P => 75,
         _ => return None,
-    };
-    speaker::note_freq(note)
+    })
+}
+
+fn key_note_freq(code: pc_keyboard::KeyCode) -> Option<u32> {
+    key_midi(code).map(officium_audio::pitch_hz)
+}
+
+/// "d4"-style name of a MIDI pitch, for echoing played notes.
+fn midi_name(pitch: u8) -> alloc::string::String {
+    const NAMES: [&str; 12] =
+        ["c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b"];
+    alloc::format!("{}{}", NAMES[(pitch % 12) as usize], pitch / 12 - 1)
 }

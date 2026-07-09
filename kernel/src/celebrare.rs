@@ -127,8 +127,9 @@ pub async fn celebrare(source_name: &str, typed: Option<String>) {
             celebrate_body(&mut platform, &env, &prog, body).await;
         }
     } else if let Some(v) = prog.verses.first() {
-        // no meteor wiring: run the first verse with a unit argument
-        match run_full(&env, v, Value::Unit).await {
+        // no meteor wiring: a verse is a function of its input — feed
+        // it zero (a num suits transcribed skeletons; unit suits none)
+        match run_full(&env, v, Value::Num(0.0)).await {
             Ok(out) => println!("{} cadenced: {:?}", v.name, out.value),
             Err(d) => loud(&d),
         }
