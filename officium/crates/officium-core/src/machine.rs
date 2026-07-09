@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use crate::builtins;
 use crate::env::Env;
 use crate::ir::Expr;
-use crate::types::{Dissonance, Mode, OpKind, Plan, Scope, Sym, Value};
+use crate::types::{Dissonance, LayerKind, Mode, OpKind, Plan, Scope, Sym, Value};
 
 /// What one verse run yields (§6.4): the pure result triple plus the
 /// committed plan, which the *driver* — not the machine — hands to the
@@ -32,6 +32,29 @@ enum Control {
     Value(Value),
 }
 
+/// One layer of the verse's monad stack (M9), carrying its effect
+/// state. Index 0 is the top of the tower; ops bind to the topmost
+/// layer of their kind at or below the current `Lift` depth.
+enum Layer {
+    Maybe,
+    Except,
+    State(Value),
+    Writer(Plan),
+    Commit,
+}
+
+impl Layer {
+    fn kind(&self) -> LayerKind {
+        match self {
+            Layer::Maybe => LayerKind::Maybe,
+            Layer::Except => LayerKind::Except,
+            Layer::State(_) => LayerKind::State,
+            Layer::Writer(_) => LayerKind::Writer,
+            Layer::Commit => LayerKind::Commit,
+        }
+    }
+}
+
 enum Frame {
     /// Function value ready; evaluate the argument next.
     AppArg(Expr, Scope),
@@ -42,18 +65,24 @@ enum Frame {
     BindK(Sym, Expr, Scope),
     /// Cadence: halt the verse with the computed value.
     ReturnK,
-    ClamaK,
-    /// Catch frame: on `User` unwind, bind the error and run the handler.
-    RecipeH(Sym, Expr, Scope),
-    PoneK,
-    MitteK,
+    /// Throw on the Except layer at this index.
+    ClamaK(usize),
+    /// Catch frame: on `User` unwind from the *same* Except layer,
+    /// bind the error and run the handler. A `clama` thrown on an
+    /// inner (lifted) layer sails past outer handlers — transformer
+    /// semantics, not a mask.
+    RecipeH(Sym, Expr, Scope, usize),
+    /// Write the State layer at this index.
+    PoneK(usize),
+    /// Append to the Writer layer at this index.
+    MitteK(usize),
     PerageK,
     /// Evaluated the genus; resolve the overload in the saved scope.
     ResolveK(Sym, Scope),
     /// Evaluated the fixpoint operand; tie the knot.
     FixK(Expr, Scope),
-    /// Restore the mode on leaving a `Lift` body.
-    ModeRestore(Mode),
+    /// Leaving a `Lift` body: restore the previous depth.
+    LiftK(usize),
     /// Finish a builtin that had to apply a closure (solve).
     BuiltinPost(builtins::PostOp),
 }
@@ -62,8 +91,12 @@ enum Frame {
 pub struct Continuation {
     control: Control,
     stack: Vec<Frame>,
-    st: Value,
-    plan: Plan,
+    /// The mode's transformer tower with its effect state (M9).
+    tower: Vec<Layer>,
+    /// How many top layers `Lift` has currently peeled away.
+    depth: usize,
+    /// Which Except layer the in-flight `User` error was thrown on.
+    thrown: usize,
     mode: Mode,
     arg: Value,
 }
@@ -72,6 +105,22 @@ pub struct Continuation {
 /// several state slots without nesting).
 pub fn empty_state() -> Value {
     Value::Record(Rc::new(BTreeMap::new()))
+}
+
+/// Build the mode's tower, seeding the topmost State layer with `st`;
+/// deeper State layers (the plagal sub-basement) start empty.
+fn build_tower(mode: Mode, st: Value) -> Vec<Layer> {
+    let mut st = Some(st);
+    mode.tower()
+        .iter()
+        .map(|k| match k {
+            LayerKind::Maybe => Layer::Maybe,
+            LayerKind::Except => Layer::Except,
+            LayerKind::State => Layer::State(st.take().unwrap_or_else(empty_state)),
+            LayerKind::Writer => Layer::Writer(Plan::empty()),
+            LayerKind::Commit => Layer::Commit,
+        })
+        .collect()
 }
 
 /// Run a verse body against an environment (§6.4). The machine itself
@@ -87,8 +136,9 @@ pub fn run_verse(
     let cont = Continuation {
         control: Control::Eval(body.clone(), Scope::default()),
         stack: Vec::new(),
-        st,
-        plan: Plan::empty(),
+        tower: build_tower(mode, st),
+        depth: 0,
+        thrown: 0,
         mode,
         arg,
     };
@@ -120,7 +170,7 @@ pub fn resume(
                 None => {
                     // the bind chain ran dry without an explicit cadence:
                     // treat the last value as the verse's result
-                    return Ok(finish(m.st, m.plan, Some(value), None));
+                    return Ok(finish(m.tower, Some(value), None));
                 }
                 Some(frame) => match value_step(env, &mut m, frame, value) {
                     Ok(StepOut::Continue(control)) => m.control = control,
@@ -135,18 +185,39 @@ pub fn resume(
     }
 }
 
-fn finish(st: Value, plan: Plan, value: Option<Value>, committed: Option<Plan>) -> VerseOutcome {
-    VerseOutcome { value, state: st, plan, committed }
+/// Drain the tower into the outcome: the verse's visible state is the
+/// topmost State layer, its plan the topmost Writer layer.
+fn finish(tower: Vec<Layer>, value: Option<Value>, committed: Option<Plan>) -> VerseOutcome {
+    let mut state = Value::Unit;
+    let mut plan = Plan::empty();
+    let (mut saw_state, mut saw_plan) = (false, false);
+    for layer in tower {
+        match layer {
+            Layer::State(v) if !saw_state => {
+                state = v;
+                saw_state = true;
+            }
+            Layer::Writer(p) if !saw_plan => {
+                plan = p;
+                saw_plan = true;
+            }
+            _ => {}
+        }
+    }
+    VerseOutcome { value, state, plan, committed }
 }
 
-/// Propagate a raised dissonance through the stack. `User` errors are
-/// caught by the nearest `RecipeH`; everything else aborts the verse —
-/// except `Silent`, which the driver reports as "no correction".
+/// Propagate a raised dissonance through the stack. A `User` error is
+/// caught by the nearest `RecipeH` *on the same Except layer* — one
+/// thrown on an inner (lifted) layer passes outer handlers untouched,
+/// which is exactly the transformer semantics (M9). Everything else
+/// aborts the verse — except `Silent`, which the driver reports as
+/// "no correction".
 fn unwind(m: &mut Continuation, d: Dissonance) -> Result<Control, Dissonance> {
     if matches!(d, Dissonance::User(_)) {
         while let Some(frame) = m.stack.pop() {
             match frame {
-                Frame::RecipeH(name, handler, scope) => {
+                Frame::RecipeH(name, handler, scope, channel) if channel == m.thrown => {
                     let err_value = match d {
                         Dissonance::User(v) => v,
                         _ => unreachable!(),
@@ -154,7 +225,7 @@ fn unwind(m: &mut Continuation, d: Dissonance) -> Result<Control, Dissonance> {
                     let scope = scope.bind(name, err_value);
                     return Ok(Control::Eval(handler, scope));
                 }
-                Frame::ModeRestore(mode) => m.mode = mode,
+                Frame::LiftK(depth) => m.depth = depth,
                 _ => {}
             }
         }
@@ -166,11 +237,13 @@ fn unwind(m: &mut Continuation, d: Dissonance) -> Result<Control, Dissonance> {
     Err(d)
 }
 
-fn check(mode: Mode, op: OpKind) -> Result<(), Dissonance> {
-    if mode.allows(op) {
-        Ok(())
-    } else {
-        Err(Dissonance::WrongMode { mode, op })
+impl Continuation {
+    /// The topmost layer of `kind` visible at the current lift depth —
+    /// or `WrongMode`: legality is the tower's structure, not a mask.
+    fn layer(&self, kind: LayerKind, op: OpKind) -> Result<usize, Dissonance> {
+        (self.depth..self.tower.len())
+            .find(|&i| self.tower[i].kind() == kind)
+            .ok_or(Dissonance::WrongMode { mode: self.mode, op })
     }
 }
 
@@ -241,51 +314,57 @@ fn eval_step(
         }
 
         Expr::Nihil => {
-            check(m.mode, OpKind::Nihil)?;
+            m.layer(LayerKind::Maybe, OpKind::Nihil)?;
             return Err(Dissonance::Silent);
         }
 
         Expr::Clama(e) => {
-            check(m.mode, OpKind::Clama)?;
-            m.stack.push(Frame::ClamaK);
+            let ch = m.layer(LayerKind::Except, OpKind::Clama)?;
+            m.stack.push(Frame::ClamaK(ch));
             Control::Eval(*e, scope)
         }
 
         Expr::Recipe(body, name, handler) => {
-            check(m.mode, OpKind::Recipe)?;
-            m.stack.push(Frame::RecipeH(name, *handler, scope.clone()));
+            let ch = m.layer(LayerKind::Except, OpKind::Recipe)?;
+            m.stack.push(Frame::RecipeH(name, *handler, scope.clone(), ch));
             Control::Eval(*body, scope)
         }
 
         Expr::Lege => {
-            check(m.mode, OpKind::Lege)?;
-            Control::Value(m.st.clone())
+            let i = m.layer(LayerKind::State, OpKind::Lege)?;
+            match &m.tower[i] {
+                Layer::State(v) => Control::Value(v.clone()),
+                _ => unreachable!(),
+            }
         }
 
         Expr::Pone(e) => {
-            check(m.mode, OpKind::Pone)?;
-            m.stack.push(Frame::PoneK);
+            let i = m.layer(LayerKind::State, OpKind::Pone)?;
+            m.stack.push(Frame::PoneK(i));
             Control::Eval(*e, scope)
         }
 
         Expr::Mitte(e) => {
-            check(m.mode, OpKind::Mitte)?;
-            m.stack.push(Frame::MitteK);
+            let i = m.layer(LayerKind::Writer, OpKind::Mitte)?;
+            m.stack.push(Frame::MitteK(i));
             Control::Eval(*e, scope)
         }
 
         Expr::Perage(e) => {
-            check(m.mode, OpKind::Perage)?;
+            m.layer(LayerKind::Commit, OpKind::Perage)?;
             m.stack.push(Frame::PerageK);
             Control::Eval(*e, scope)
         }
 
         Expr::Lift(e) => {
-            check(m.mode, OpKind::Lift)?;
-            m.stack.push(Frame::ModeRestore(m.mode));
-            // v1: the enclosed computation runs as the base (authentic)
-            // mode of the same final; the value passes through unchanged
-            m.mode = Mode::from_final(m.mode.final_(), false);
+            // the transformer's lift (M9): peel the top layer so the
+            // enclosed computation runs one level down the tower; the
+            // value passes through unchanged
+            if m.tower.len() - m.depth < 2 {
+                return Err(Dissonance::WrongMode { mode: m.mode, op: OpKind::Lift });
+            }
+            m.stack.push(Frame::LiftK(m.depth));
+            m.depth += 1;
             Control::Eval(*e, scope)
         }
     })
@@ -327,32 +406,39 @@ fn value_step(
 
         Frame::ReturnK => {
             // Amen: cadence to the tonic halts the whole verse
-            let st = core::mem::replace(&mut m.st, Value::Unit);
-            let plan = core::mem::take(&mut m.plan);
-            Halt(finish(st, plan, Some(value), None))
+            let tower = core::mem::take(&mut m.tower);
+            Halt(finish(tower, Some(value), None))
         }
 
-        Frame::ClamaK => return Err(Dissonance::User(value)),
+        Frame::ClamaK(channel) => {
+            m.thrown = channel;
+            return Err(Dissonance::User(value));
+        }
 
         // the guarded computation finished without clamare: drop the handler
-        Frame::RecipeH(_, _, _) => Continue(Control::Value(value)),
+        Frame::RecipeH(_, _, _, _) => Continue(Control::Value(value)),
 
-        Frame::PoneK => {
-            m.st = value;
+        Frame::PoneK(i) => {
+            m.tower[i] = Layer::State(value);
             Continue(Control::Value(Value::Unit))
         }
 
-        Frame::MitteK => match value {
-            Value::Cmd(cmd) => {
-                m.plan.0.push(cmd);
-                Continue(Control::Value(Value::Unit))
+        Frame::MitteK(i) => {
+            let Layer::Writer(plan) = &mut m.tower[i] else { unreachable!() };
+            match value {
+                Value::Cmd(cmd) => {
+                    plan.0.push(cmd);
+                    Continue(Control::Value(Value::Unit))
+                }
+                Value::Plan(p) => {
+                    plan.append(p);
+                    Continue(Control::Value(Value::Unit))
+                }
+                other => {
+                    return Err(Dissonance::Dissonant { want: "cmd", got: other.ty() })
+                }
             }
-            Value::Plan(p) => {
-                m.plan.append(p);
-                Continue(Control::Value(Value::Unit))
-            }
-            other => return Err(Dissonance::Dissonant { want: "cmd", got: other.ty() }),
-        },
+        }
 
         Frame::PerageK => match value {
             Value::Plan(p) => {
@@ -361,9 +447,8 @@ fn value_step(
                     // is empty — the real mass would jerk on garbage
                     return Err(Dissonance::Premature);
                 }
-                let st = core::mem::replace(&mut m.st, Value::Unit);
-                let plan = core::mem::take(&mut m.plan);
-                Halt(finish(st, plan, Some(Value::Unit), Some(p)))
+                let tower = core::mem::take(&mut m.tower);
+                Halt(finish(tower, Some(Value::Unit), Some(p)))
             }
             other => {
                 let _ = other;
@@ -397,8 +482,8 @@ fn value_step(
             Continue(apply(m, value, self_ref)?)
         }
 
-        Frame::ModeRestore(mode) => {
-            m.mode = mode;
+        Frame::LiftK(depth) => {
+            m.depth = depth;
             Continue(Control::Value(value))
         }
 

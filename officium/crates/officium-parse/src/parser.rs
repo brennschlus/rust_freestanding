@@ -474,6 +474,18 @@ impl Parser {
                         let e = self.atom()?;
                         Ok(Expr::Pure(Mode::Dorian, Box::new(e)))
                     }
+                    "leva" => {
+                        // the transformer's lift (M9): run the enclosed
+                        // computation one layer down the tower
+                        let e = self.atom()?;
+                        Ok(Expr::Lift(Box::new(e)))
+                    }
+                    "pone" => {
+                        // pone as an expression (yields unit), so a put
+                        // can live inside `leva (pone e)`
+                        let e = self.atom()?;
+                        Ok(Expr::Pone(Box::new(e)))
+                    }
                     _ => Ok(Expr::Var(s)),
                 }
             }

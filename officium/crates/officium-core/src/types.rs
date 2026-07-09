@@ -86,22 +86,54 @@ impl Mode {
         }
     }
 
-    /// The capability mask (§4.1). This is what makes "you cannot `pone`
-    /// in a Dorian verse" true without separate monad types.
-    pub fn allows(&self, op: OpKind) -> bool {
-        use Mode::*;
-        use OpKind::*;
+    /// The transformer tower (M9, §6.3 stretch): the monad a verse in
+    /// this mode runs in, listed top layer first. An authentic mode is
+    /// its base monad alone; a plagal mode "reaches below the final" —
+    /// the same transformer stacked over the base of its own final, so
+    /// `Lift` embeds a base-monad computation (one layer down).
+    /// Hypomixolydian is the deliberate exception: the Plan floats
+    /// free, with nothing beneath it — lifting the commit monad under
+    /// the pure planner would breach the purity boundary (§4.5).
+    pub fn tower(&self) -> &'static [LayerKind] {
+        use LayerKind::*;
         match self {
-            Dorian => matches!(op, Nihil),
-            Hypodorian => matches!(op, Nihil | Lift),
-            Phrygian => matches!(op, Clama | Recipe),
-            Hypophrygian => matches!(op, Clama | Recipe | Lift),
-            Lydian => matches!(op, Lege | Pone),
-            Hypolydian => matches!(op, Lege | Pone | Lift),
-            Mixolydian => matches!(op, Perage),
-            Hypomixolydian => matches!(op, Mitte),
+            Mode::Dorian => &[Maybe],
+            Mode::Hypodorian => &[Maybe, Maybe],
+            Mode::Phrygian => &[Except],
+            Mode::Hypophrygian => &[Except, Except],
+            Mode::Lydian => &[State],
+            Mode::Hypolydian => &[State, State],
+            Mode::Mixolydian => &[Commit],
+            Mode::Hypomixolydian => &[Writer],
         }
     }
+
+    /// Which ops are legal — no longer a mask table but a theorem of
+    /// the tower: an op is legal iff some layer provides it, and `lift`
+    /// iff there is a layer below to lift from.
+    pub fn allows(&self, op: OpKind) -> bool {
+        let t = self.tower();
+        match op {
+            OpKind::Nihil => t.contains(&LayerKind::Maybe),
+            OpKind::Clama | OpKind::Recipe => t.contains(&LayerKind::Except),
+            OpKind::Lege | OpKind::Pone => t.contains(&LayerKind::State),
+            OpKind::Mitte => t.contains(&LayerKind::Writer),
+            OpKind::Perage => t.contains(&LayerKind::Commit),
+            OpKind::Lift => t.len() > 1,
+        }
+    }
+}
+
+/// One layer of a mode's monad stack (M9). `Maybe` provides `nihil`,
+/// `Except` provides `clama`/`recipe`, `State` provides `lege`/`pone`,
+/// `Writer` provides `mitte`, `Commit` provides `perage`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerKind {
+    Maybe,
+    Except,
+    State,
+    Writer,
+    Commit,
 }
 
 // --- the physics side: plans of gravity commands ---
