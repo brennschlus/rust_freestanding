@@ -13,10 +13,12 @@ fn sung_meteor_parses_with_rhyme_scheme() {
     let prog = parse(CANTUS).expect("the sung score must parse");
     assert_eq!(prog.fugues.len(), 1);
     assert_eq!(prog.verses.len(), 3);
-    for v in &prog.verses {
+    let schemes = [("correctio", "AABCCBDD"), ("consilium", "AABBCCDD"), ("executio", "AABBCCDD")];
+    for (name, want) in schemes {
+        let v = prog.verse(name).unwrap();
         assert_eq!(v.rhymes.len(), 8, "verse {} is not eight lines", v.name);
         let scheme: String = v.rhymes.iter().map(|(l, _)| *l).collect();
-        assert_eq!(scheme, "ABABABCC", "verse {} rhyme scheme", v.name);
+        assert_eq!(scheme, want, "verse {} rhyme scheme", v.name);
         assert!(
             v.rhymes.iter().all(|(_, text)| !text.is_empty()),
             "verse {} has a silent line",

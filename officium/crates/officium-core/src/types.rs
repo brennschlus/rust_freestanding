@@ -265,6 +265,9 @@ pub enum Dissonance {
     Unconsecrated,
     /// Unbound variable (not in scope, builtins, or pedals).
     UnboundVar { name: Sym },
+    /// Static check failure (§7.4): a rhyme that does not unify, or any
+    /// type/mode clash the checker caught before the verse was sung.
+    Discors { versus: Sym, msg: String },
     /// Step budget exhausted; resumable, not a failure.
     OutOfFuel(Box<Continuation>),
     /// Parser diagnostics.
@@ -288,6 +291,9 @@ impl fmt::Debug for Dissonance {
             Dissonance::Premature => write!(f, "Premature"),
             Dissonance::Unconsecrated => write!(f, "Unconsecrated"),
             Dissonance::UnboundVar { name } => write!(f, "UnboundVar {{ name: {} }}", name),
+            Dissonance::Discors { versus, msg } => {
+                write!(f, "Discors {{ versus: {}, msg: {} }}", versus, msg)
+            }
             Dissonance::OutOfFuel(_) => write!(f, "OutOfFuel(<continuation>)"),
             Dissonance::Parse { line, msg } => {
                 write!(f, "Parse {{ line: {}, msg: {} }}", line, msg)

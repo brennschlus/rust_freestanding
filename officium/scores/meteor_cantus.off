@@ -1,9 +1,14 @@
 ; Officium reference score, sung form (§7.3): the same three-mode
 ; planetary defense as meteor.off, but each verse in the liturgical
 ; eight lines. A line is `label "sung text" ; statement` — the text is
-; what the choir sings, the statement is what it means. Rhyme scheme
-; ABABAB CC: A-lines carry frame, B-lines force, the volta falls
-; between line 6 and 7, and the final couplet builds the result.
+; what the choir sings, the statement is what it means.
+;
+; Rhyme = type (§7.4): lines sharing a label must carry unifiable
+; statement types, and the checker verifies it before a note sounds.
+; Hence the sequence-like schemes below — every rhyme is honest:
+; A-lines answer each other with the same type (the antiphon lines
+; echo a value back), and the final couplet carries the verse's
+; result. The volta falls between line 6 and line 7.
 ; The fugue is not sung — the organ holds it (§4.2).
 
 fuga gravitas in Sol {
@@ -14,35 +19,41 @@ fuga gravitas in Sol {
   contra     \r -> r * r                  ; r-squared always sounds with the subject
 }
 
+; scheme AABCCB DD: A = the body (corpus), B = force numbers,
+; C = distance numbers, D = the couplet (the verse's Field / nihil)
 versus correctio in Re {
-  A "Corpus errans per inane fertur"      ; corpus <- arg
-  B "Pondus mundi pedale tenetur"         ; g <- ask "G"
-  A "Quam longinqua via metietur"         ; r <- pure (dist corpus)
-  B "Quale genus talis vis sequetur"      ; f <- resolve "trahere" (genus corpus)
-  A "Impetus flectendi iam paretur"       ; dv <- pure (solve f r)
-  B "Utrum tutum sit interrogetur"        ; tutum <- pure (safe corpus g)
-  C "Si tutum est nihil iam canendum"     ; si tutum tunc { nihil } aliter {
-  C "Sin autem caelum est flectendum"     ; amen (deflect dv) }
+  A "Corpus errans in caelo videtur"      ; corpus <- arg
+  A "Et a choro testis intuetur"          ; testis <- pure corpus
+  B "Vis attractionis pedale sonat"       ; g <- ask "G"
+  C "Quam longinqua via mensuratur"       ; r <- pure (dist corpus)
+  C "Quadratum viae contra cantatur"      ; via <- pure (r * r)
+  B "Modus trahendi genus coronat"        ; dv <- pure (solve (resolve "trahere" (genus corpus)) r)
+  D "Si tutum silet vox in aeternum"      ; si (safe corpus g) tunc { nihil } aliter {
+  D "Sin flectat caelum iter externum"    ; amen (deflect dv) }
 }
 
+; scheme AABBCC DD: A = the field, B = its numbers, C = the command,
+; D = the couplet (the pure result, nothing yet moved)
 versus consilium in sol {
-  A "Campus datus in manus scribentis"    ; field <- arg
+  A "Campus purus in manus traditur"      ; field <- arg
+  A "Pignus fidele choro redditur"        ; pignus <- pure field
   B "Cui corpori vis dirigenda"           ; t <- pure (target field)
-  A "Quantus impetus sit imponentis"      ; d <- pure (dv_of field)
-  B "Quo momento plaga infligenda"        ; tempus <- pure (at field)
-  A "Iussum sanctum surgit e canentis"    ; iussum <- pure (cmd t d tempus)
-  B "In librum consilii mittenda"         ; mitte iussum
-  C "Nihil adhuc in mundo motum est"      ; testis <- pure verum
-  C "Consilium purum perfectum est"       ; amen field
+  B "Et quanta virtus imponenda"          ; d <- pure (dv_of field)
+  C "Iussum e campo iam formatur"         ; iussum <- pure (cmd t d (at field))
+  C "In librum consilii mittatur"         ; mitte iussum
+  D "Nihil adhuc in mundo motum est"      ; quies <- pure verum
+  D "Consilium purum perfectum est"       ; amen field
 }
 
+; scheme AABBCC DD: A = the plan, B and C = the doxology,
+; D = the couplet — the commit, the only impure act
 versus executio in Sol {
-  A "Consilium in manus accipitur"        ; plan <- arg
-  B "Gloria Patri semper canitur"         ; gloria <- pure "patri"
-  A "Semel tantum opus committitur"       ; semel <- pure 1
-  B "Et Filio laus concinitur"            ; laus <- pure "filio"
-  A "Quod cantavimus nunc agitur"         ; actum <- pure verum
-  B "Spirituique honor redditur"          ; honor <- pure "spiritui"
-  C "Per omnia saecula saeculorum"        ; saecula <- pure "amen"
-  C "Perage - fiat opus organorum"        ; perage plan
+  A "Consilium plenum accipitur"          ; plan <- arg
+  A "Pignus ultimum custoditur"           ; pignus <- pure plan
+  B "Gloria Patri qui fundavit"           ; gloria <- pure "patri"
+  B "Et Filio qui nos salvavit"           ; laus <- pure "filio"
+  C "Spiritui vivificanti"                ; honor <- pure "spiritui"
+  C "Laude aeterna resonanti"             ; iubilus <- pure "saecula"
+  D "Per omnia saecula saeculorum"        ; finis <- pure "amen"
+  D "Perage - fiat opus manuum"           ; perage plan
 }

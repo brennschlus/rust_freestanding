@@ -63,6 +63,10 @@ fn loud(d: &Dissonance) {
         Dissonance::Unconsecrated => {
             eprintln!("!!! DISSONANTIA: UNCONSECRATED COMMIT — that value is no Plan.");
         }
+        Dissonance::Discors { versus, msg } => {
+            eprintln!("!!! DISSONANTIA DISCORS in versus {versus}: {msg}");
+            eprintln!("!!! The score is refused before a note sounds.");
+        }
         other => eprintln!("dissonantia: {other:?}"),
     }
 }
@@ -160,6 +164,11 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // M7: refuse a discordant score before a single note sounds
+    if let Err(d) = officium_core::check_program(&prog) {
+        loud(&d);
+        std::process::exit(1);
+    }
     let env = Env::from_fugues(&prog.fugues);
     println!(
         "score: {} fugue(s), {} verse(s), {} voice(s) in the environment",

@@ -85,6 +85,11 @@ pub async fn celebrare(source_name: &str, typed: Option<String>) {
         Ok(p) => p,
         Err(d) => return loud(&d),
     };
+    // M7: the rhyme must unify — a discordant score is refused before
+    // a single note sounds
+    if let Err(d) = officium_core::check_program(&prog) {
+        return loud(&d);
+    }
     let env = Env::from_fugues(&prog.fugues);
     println!(
         "officium: {} fugue(s), {} verse(s), {} voice(s)",
@@ -222,6 +227,10 @@ fn loud(d: &Dissonance) {
         }
         Dissonance::Parse { line, msg } => {
             println!("dissonantia (parse, line {}): {}", line, msg);
+        }
+        Dissonance::Discors { versus, msg } => {
+            println!("!!! DISSONANTIA DISCORS in versus {}: {}", versus, msg);
+            println!("!!! The rhyme does not unify; the score is refused unsung.");
         }
         other => println!("dissonantia: {:?}", other),
     }

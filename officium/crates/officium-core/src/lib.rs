@@ -10,11 +10,13 @@
 extern crate alloc;
 
 pub mod builtins;
+pub mod check;
 pub mod env;
 pub mod ir;
 pub mod machine;
 pub mod types;
 
+pub use check::check_program;
 pub use env::{Env, Fugue, Program, Versus};
 pub use ir::Expr;
 pub use machine::{run_verse, resume, Continuation, VerseOutcome};
