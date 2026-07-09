@@ -7,7 +7,7 @@ tags: [officium/impl]
 
 | вариант | смысл | провал? |
 |---|---|---|
-| `WrongMode { mode, op }` | нарушение [[Лады как монады\|маски способностей]] | да |
+| `WrongMode { mode, op }` | в [[Лады как монады\|башне лада]] нет слоя для операции | да |
 | `Unresolved { name, genus }` | нет real/tonal ответа ([[Фуга как Reader]]) | да |
 | `Silent` | Protus `nihil` — «коррекция не нужна» | **нет** (сигнал) |
 | `User(value)` | Deuterus `clama`, ловится `recipe` | да |
