@@ -1,0 +1,48 @@
+; Officium reference score, sung form (§7.3): the same three-mode
+; planetary defense as meteor.off, but each verse in the liturgical
+; eight lines. A line is `label "sung text" ; statement` — the text is
+; what the choir sings, the statement is what it means. Rhyme scheme
+; ABABAB CC: A-lines carry frame, B-lines force, the volta falls
+; between line 6 and 7, and the final couplet builds the result.
+; The fugue is not sung — the organ holds it (§4.2).
+
+fuga gravitas in Sol {
+  pedale     G = 6.674e-11                ; grav. constant, held in the pedals
+  subiectum  trahere(corpus) = \r -> G * mass(corpus) / (r * r)
+  reale      trahere @ asteroides = \r -> G * mass(corpus) / (r * r)
+  tonale     trahere @ cometes    = \r -> (G * mass(corpus) / (r * r)) + outgassing(corpus)
+  contra     \r -> r * r                  ; r-squared always sounds with the subject
+}
+
+versus correctio in Re {
+  A "Corpus errans per inane fertur"      ; corpus <- arg
+  B "Pondus mundi pedale tenetur"         ; g <- ask "G"
+  A "Quam longinqua via metietur"         ; r <- pure (dist corpus)
+  B "Quale genus talis vis sequetur"      ; f <- resolve "trahere" (genus corpus)
+  A "Impetus flectendi iam paretur"       ; dv <- pure (solve f r)
+  B "Utrum tutum sit interrogetur"        ; tutum <- pure (safe corpus g)
+  C "Si tutum est nihil iam canendum"     ; si tutum tunc { nihil } aliter {
+  C "Sin autem caelum est flectendum"     ; amen (deflect dv) }
+}
+
+versus consilium in sol {
+  A "Campus datus in manus scribentis"    ; field <- arg
+  B "Cui corpori vis dirigenda"           ; t <- pure (target field)
+  A "Quantus impetus sit imponentis"      ; d <- pure (dv_of field)
+  B "Quo momento plaga infligenda"        ; tempus <- pure (at field)
+  A "Iussum sanctum surgit e canentis"    ; iussum <- pure (cmd t d tempus)
+  B "In librum consilii mittenda"         ; mitte iussum
+  C "Nihil adhuc in mundo motum est"      ; testis <- pure verum
+  C "Consilium purum perfectum est"       ; amen field
+}
+
+versus executio in Sol {
+  A "Consilium in manus accipitur"        ; plan <- arg
+  B "Gloria Patri semper canitur"         ; gloria <- pure "patri"
+  A "Semel tantum opus committitur"       ; semel <- pure 1
+  B "Et Filio laus concinitur"            ; laus <- pure "filio"
+  A "Quod cantavimus nunc agitur"         ; actum <- pure verum
+  B "Spirituique honor redditur"          ; honor <- pure "spiritui"
+  C "Per omnia saecula saeculorum"        ; saecula <- pure "amen"
+  C "Perage - fiat opus organorum"        ; perage plan
+}

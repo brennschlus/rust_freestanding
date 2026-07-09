@@ -1,6 +1,10 @@
 //! Line-oriented lexer for the plain form (§7.1). `;` starts a comment
-//! to end of line. Newlines are significant tokens: they terminate
-//! statements and expressions (except inside parentheses).
+//! to end of line — with one liturgical exception (§7.3): on a line
+//! that begins `label "sung text"` (a single uppercase rhyme label
+//! followed by a string), the first `;` is a separator token dividing
+//! the sung text from the statement it lowers to. Any later `;` on the
+//! line is a comment again. Newlines are significant tokens: they
+//! terminate statements and expressions (except inside parentheses).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -26,7 +30,17 @@ pub enum Tok {
     Minus,
     Star,
     Slash,
+    Semi, // liturgical separator: label "text" ; stmt (§7.3)
     Newline,
+}
+
+/// A rhyme label is a single uppercase ASCII letter (A, B, C ...).
+pub fn rhyme_label(s: &str) -> Option<char> {
+    let mut chars = s.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if c.is_ascii_uppercase() => Some(c),
+        _ => None,
+    }
 }
 
 pub struct Lexed {
@@ -54,8 +68,25 @@ pub fn lex(src: &str) -> Result<Lexed, Dissonance> {
             }
             ' ' | '\t' | '\r' => i += 1,
             ';' => {
-                while i < bytes.len() && bytes[i] != b'\n' {
+                // liturgical line head? tokens since the last newline
+                // must be exactly [rhyme label, sung text] (§7.3)
+                let line_start = toks
+                    .iter()
+                    .rposition(|(t, _)| matches!(t, Tok::Newline))
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                let head = &toks[line_start..];
+                let is_sung = matches!(
+                    head,
+                    [(Tok::Ident(l), _), (Tok::Str(_), _)] if rhyme_label(l).is_some()
+                );
+                if is_sung {
+                    toks.push((Tok::Semi, line));
                     i += 1;
+                } else {
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
                 }
             }
             '{' => {

@@ -18,6 +18,7 @@ use crate::task::yield_now;
 use crate::{ac97, interrupts, println};
 
 const METEOR: &str = include_str!("../../officium/scores/meteor.off");
+const CANTUS: &str = include_str!("../../officium/scores/meteor_cantus.off");
 
 /// How many trampoline steps a verse may take between yields.
 const FUEL_SLICE: u64 = 20_000;
@@ -70,8 +71,12 @@ pub async fn celebrare(source_name: &str, typed: Option<String>) {
     let src: &str = match (source_name, &typed) {
         ("-", Some(s)) => s.as_str(),
         ("meteor", _) => METEOR,
+        ("cantus", _) => CANTUS,
         _ => {
-            println!("unknown score '{}'; try: celebrare meteor | celebrare -", source_name);
+            println!(
+                "unknown score '{}'; try: celebrare meteor | celebrare cantus | celebrare -",
+                source_name
+            );
             return;
         }
     };
@@ -87,6 +92,16 @@ pub async fn celebrare(source_name: &str, typed: Option<String>) {
         prog.verses.len(),
         env.voices()
     );
+
+    // sung verses (§7.3) show their poem: rhyme label + text per line
+    for v in &prog.verses {
+        if !v.rhymes.is_empty() {
+            println!("versus {}:", v.name);
+            for (label, text) in &v.rhymes {
+                println!("  {}  {}", label, text);
+            }
+        }
+    }
 
     // the office is read back aurally first: the organ holds the fugue
     if ac97::is_available() {

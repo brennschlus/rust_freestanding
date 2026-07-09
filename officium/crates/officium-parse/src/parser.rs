@@ -11,7 +11,7 @@ use officium_core::env::{Fugue, Program, Versus};
 use officium_core::ir::Expr;
 use officium_core::types::{Dissonance, Final, Mode, Value};
 
-use crate::lexer::{lex, Tok};
+use crate::lexer::{lex, rhyme_label, Tok};
 
 pub fn parse(src: &str) -> Result<Program, Dissonance> {
     let lexed = lex(src)?;
@@ -196,8 +196,89 @@ impl Parser {
         let (_, mode) = self.final_and_mode()?;
         self.skip_newlines();
         self.expect(Tok::LBrace, "expected '{' opening the verse")?;
+        let rhymes = self.liturgical_strip()?;
         let body = self.stmts(mode)?;
-        Ok(Versus { name, mode, body })
+        Ok(Versus { name, mode, body, rhymes })
+    }
+
+    /// §7.3 lowering. If the verse body opens with `label "text" ;` it
+    /// is the sung form: walk the verse's tokens, strip each line's
+    /// label + text + separator (recording the rhyme scheme), and leave
+    /// a plain-form token stream for `stmts`. A statement may spill
+    /// over onto the next sung line (its braces keep the parser going),
+    /// and unlabeled continuation lines are left untouched.
+    fn liturgical_strip(&mut self) -> Result<Vec<(char, String)>, Dissonance> {
+        let mut i = self.pos;
+        while matches!(self.toks.get(i), Some((Tok::Newline, _))) {
+            i += 1;
+        }
+        let opens_sung = matches!(
+            (self.toks.get(i), self.toks.get(i + 1)),
+            (Some((Tok::Ident(l), _)), Some((Tok::Str(_), _))) if rhyme_label(l).is_some()
+        );
+        if !opens_sung {
+            return Ok(Vec::new()); // plain form
+        }
+
+        let mut rhymes: Vec<(char, String)> = Vec::new();
+        let mut depth = 1u32; // the verse's '{' is already consumed
+        let mut at_line_start = true;
+        let mut j = i;
+        while j < self.toks.len() {
+            match &self.toks[j].0 {
+                Tok::LBrace => depth += 1,
+                Tok::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Tok::Newline => {
+                    at_line_start = true;
+                    j += 1;
+                    continue;
+                }
+                Tok::Ident(l) if at_line_start && rhyme_label(l).is_some() => {
+                    if let Some((Tok::Str(text), line)) = self.toks.get(j + 1).cloned() {
+                        if !matches!(self.toks.get(j + 2), Some((Tok::Semi, _))) {
+                            return Err(Dissonance::Parse {
+                                line,
+                                msg: String::from("expected ';' after the sung text"),
+                            });
+                        }
+                        rhymes.push((rhyme_label(l).unwrap(), text));
+                        self.toks.drain(j..j + 3);
+                        at_line_start = false;
+                        continue; // the statement now starts at j
+                    }
+                }
+                _ => {}
+            }
+            at_line_start = false;
+            j += 1;
+        }
+
+        let line = self.toks.get(self.pos).map(|(_, l)| *l).unwrap_or(1);
+        let err = |msg: String| Dissonance::Parse { line, msg };
+        if rhymes.len() != 8 {
+            return Err(err(format!(
+                "a verse is sung in eight lines (this one has {})",
+                rhymes.len()
+            )));
+        }
+        // the volta couplet (lines 7-8) must rhyme with itself
+        if rhymes[6].0 != rhymes[7].0 {
+            return Err(err(String::from(
+                "the volta couplet must rhyme (lines 7 and 8 share a label)",
+            )));
+        }
+        // every rhyme must be answered by at least one other line
+        for (l, _) in &rhymes {
+            if rhymes.iter().filter(|(m, _)| m == l).count() < 2 {
+                return Err(err(format!("rhyme '{l}' is never answered")));
+            }
+        }
+        Ok(rhymes)
     }
 
     /// Parse statements up to the closing '}' and lower them to a bind

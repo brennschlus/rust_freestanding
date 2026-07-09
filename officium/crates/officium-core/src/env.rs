@@ -44,6 +44,10 @@ pub struct Versus {
     pub name: Sym,
     pub mode: Mode,
     pub body: Expr,
+    /// The sung surface (§7.3): rhyme label + text per line, in order.
+    /// Empty for the plain form. Labels feed the M7 type checker
+    /// (rhyme = unification); the text is flavor, kept for display.
+    pub rhymes: Vec<(char, String)>,
 }
 
 /// A parsed score: fugues + verses.

@@ -76,7 +76,7 @@ async fn execute(line: &str) {
             println!("  play <notes>   play notes, e.g. play c4 e4 g4 c5:800");
             println!("  piano          live instrument (pc speaker, mono)");
             println!("  organ          live instrument (ac97, polyphonic)");
-            println!("  celebrare <s>  run an Officium score (meteor, or - to type one)");
+            println!("  celebrare <s>  run an Officium score (meteor, cantus, or - to type one)");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
