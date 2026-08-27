@@ -3,6 +3,7 @@ use conquer_once::spin::OnceCell;
 use pic8259::ChainedPics;
 use spinning_top::Spinlock;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use x86_64::{PrivilegeLevel, VirtAddr};
 
 // remap the PICs: their default vectors 0-15 collide with CPU exceptions,
 // so move them to 32-47 (right after the 32 exception slots)
@@ -62,6 +63,13 @@ pub fn init_idt() {
         idt[PIC_1_OFFSET + 9].set_handler_fn(pci_sound_irq9_handler);
         idt[PIC_1_OFFSET + 10].set_handler_fn(pci_sound_irq10_handler);
         idt[PIC_1_OFFSET + 11].set_handler_fn(pci_sound_irq11_handler);
+        // the syscall gate: DPL 3 so ring 3 may `int 0x80`; the handler
+        // is a naked trampoline, so install it by address
+        unsafe {
+            idt[0x80]
+                .set_handler_addr(VirtAddr::new(crate::usermode::syscall_handler_addr()))
+                .set_privilege_level(PrivilegeLevel::Ring3);
+        }
         idt
     });
     idt.load();

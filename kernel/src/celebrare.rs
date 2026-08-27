@@ -28,15 +28,19 @@ const MAX_SLICES: u32 = 500;
 
 struct KernelPlatform;
 
+/// The single audited effect boundary (§Граница чистоты). Both the
+/// ring-0 `KernelPlatform` and the ring-3 `SYS_COMMIT` syscall funnel
+/// through here, so "the same effect" is literally the same code.
+pub fn gravity_sink_line(target: u64, dv_x: f64, at: u64) {
+    println!("GRAVITAS  target={}  dv.x={}  at={}us", target, dv_x, at);
+}
+
 impl Platform for KernelPlatform {
     fn gravity_sink(&mut self, plan: &Plan) -> Result<(), Dissonance> {
         // v1 gravity hardware: the console. Swapping in a real sink
         // keeps this the single audited effect boundary.
         for cmd in &plan.0 {
-            println!(
-                "GRAVITAS  target={}  dv.x={}  at={}us",
-                cmd.target, cmd.dv.x, cmd.at
-            );
+            gravity_sink_line(cmd.target, cmd.dv.x, cmd.at);
         }
         Ok(())
     }

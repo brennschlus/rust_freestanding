@@ -79,6 +79,7 @@ async fn execute(line: &str) {
             println!("  organ          live instrument (ac97, polyphonic)");
             println!("  transcribe     play a phrase, hear it back as an Officium verse");
             println!("  celebrare <s>  run an Officium score (meteor, cantus, or - to type one)");
+            println!("  userspace      celebrate from ring 3 through the syscall gate");
         }
         "echo" => {
             // keep the original spacing instead of re-joining the parts
@@ -126,6 +127,7 @@ async fn execute(line: &str) {
             let name = parts.next().unwrap_or("meteor");
             crate::celebrare::celebrare(name, None).await;
         }
+        "userspace" | "mundus" => crate::usermode::run(),
         unknown => println!("unknown command '{}', try 'help'", unknown),
     }
 }

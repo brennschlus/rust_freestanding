@@ -21,6 +21,7 @@ mod memory;
 mod pci;
 mod speaker;
 mod task;
+mod usermode;
 mod vga_buffer;
 
 use task::{Task, executor::Executor};
@@ -65,6 +66,10 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     }
 
     interrupts::init_pics();
+
+    // park the mapper + frame allocator so the userspace loader can map
+    // ring-3 pages on demand
+    memory::init_global(mapper, frame_allocator);
 
     println!("rust_freestanding kernel");
     println!("type 'help' for a list of commands");
